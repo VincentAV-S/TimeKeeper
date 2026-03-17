@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MultiTimer – SVG Timetable (sessions toggle)</title>
+  <style>
+    :root{
+      --bg:#0e1116; --ink:#e8eef6; --muted:#9aa3b2;
+      --card:#161b22; --grid:#233040; --accent:#3b82f6;
+      --lane-w:92;            /* logical SVG lane width in px */
+      --row-h:28;             /* logical SVG half-hour row height in px */
+      --time-col:140;         /* logical SVG time column width */
+      --pad-right:40;         /* logical SVG right padding */
+      --pad-bottom:12;        /* logical SVG bottom padding */
+      --marker:#10b981; --boundary:#334155;
+      --danger1:#ef4444; --danger2:#7f1d1d; --green1:#22c55e; --green2:#15803d;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    html{ -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+    body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,'Helvetica Neue',Arial,sans-serif}
+
+    header{display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid #1d2633;background:#161b22;position:sticky;top:0;z-index:5}
+    header h1{margin:0;font-size:18px;font-weight:600}
+    .spacer{flex:1}
+    .topbtn{min-width:140px;padding:6px 10px}
+
+    main{display:grid;grid-template-columns:1fr;gap:14px;padding:14px}
+
+    .card{background:#161b22;border:1px solid #1d2633;border-radius:12px}
+    .section{padding:14px}
+    .muted{color:var(--muted)}
+
+    input,button,label{font:inherit}
+    input[type="text"], input[type="number"]{width:100%;padding:8px 10px;border-radius:10px;border:1px solid #2a3340;background:#0f141a;color:var(--ink)}
+    button{padding:6px 8px;border-radius:10px;border:1px solid #2a3340;background:#1a2330;color:var(--ink);cursor:pointer;transition:transform .02s ease}
+    button:active{transform:scale(.98)}
+    button.primary{background:linear-gradient(180deg,#3b82f6,#1d4ed8);border:none;color:white}
+    button.small{font-size:12px;padding:6px 8px}
+    button:disabled{opacity:.6;cursor:not-allowed}
+    .btn-running{ background:linear-gradient(180deg,var(--green1),var(--green2)) !important; border:none!important; color:white!important; }
+    .btn-danger{ background:linear-gradient(180deg,var(--danger1),var(--danger2)); border:none; color:white; }
+
+    .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .chip{display:inline-flex;align-items:center;gap:6px;padding:3px 8px;border-radius:999px;border:1px solid #2a3340}
+    .pillline{display:flex;gap:8px;align-items:center;justify-content:space-between}
+
+    .timer{display:grid;grid-template-columns:1fr;gap:8px;padding:10px;border:1px solid #222c3a;border-radius:10px;background:#0f151d;margin-bottom:10px}
+    .timer .meta{font-size:12px;color:var(--muted)}
+    .name-edit{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+    .controls{display:grid;grid-template-columns:1fr auto;align-items:center;gap:8px}
+    .controls-left{display:flex;gap:6px;flex-wrap:wrap}
+    .sessions{border-top:1px dashed #253042;padding-top:8px;margin-top:8px}
+    .session-row{display:grid;grid-template-columns:1fr;gap:8px;background:#0c1219;border:1px solid #1d2633;border-radius:8px;padding:10px;margin-top:10px}
+    .session-info{font-size:12px;color:var(--muted)}
+    .session-controls-wrap{display:grid;gap:8px}
+    .control-header{font-size:12px;color:#cbd5e1;opacity:.9;text-transform:uppercase;letter-spacing:.06em}
+    .button-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+    .button-grid>button{width:100%;text-align:center}
+    .sep{height:1px;background:linear-gradient(90deg,#ffffff18,#ffffff55,#ffffff18);border-radius:1px;margin:2px 0}
+
+    /* Timetable (SVG) */
+    .svg-wrap{padding:8px}
+    .svg-box{
+      height:78vh;
+      border:1px solid #233040;
+      border-radius:10px;
+      background:linear-gradient(180deg,#0d131a,#0b1016);
+      display:flex;align-items:center;justify-content:center;
+      overflow:hidden;
+    }
+    .svg-box svg{
+      width:100%; height:100%;
+      display:block;
+      background:transparent;
+    }
+
+    .legend{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+    .legend .chip{padding:4px 10px}
+  </style>
+</head>
+<body>
+<header>
+  <h1>MultiTimer</h1>
+  <div class="spacer"></div>
+  <button id="fitToggle" class="small topbtn">Auto-Fit: On</button>
+  <button id="resetAll" class="small topbtn">Reset All</button>
+</header>
+
+<main>
+  <!-- Timers on top -->
+  <div class="card">
+    <div class="section">
+      <div class="row" style="margin-bottom:8px;">
+        <label class="chip" style="flex:1; gap:8px;">
+          Period:
+          <input id="periodInput" type="text" placeholder="e.g., 36WED20250903  ·  S 36TUE 2100 - W 36WED 0700" />
+        </label>
+      </div>
+
+      <div class="row" style="margin-bottom:12px;">
+        <label class="chip" title="Total hours in the timetable from the first start (anchor)">
+          Hours:
+          <input id="hoursInput" type="number" min="10" max="72" step="1" value="10" style="width:90px;margin-left:6px">
+        </label>
+        <span class="muted">Timetable begins when the first timer starts.</span>
+      </div>
+
+      <div class="row" style="margin-bottom:10px;">
+        <input id="newName" type="text" placeholder="New timer name (e.g., Sleep, Work, F)" style="flex:1"/>
+        <button class="primary" id="addBtn">+ Add</button>
+      </div>
+
+      <div id="timers"></div>
+    </div>
+
+    <div class="section muted" style="border-top:1px solid #1d2633">
+      Tip: Tap a timer's “Show Sessions” to inspect its history. Tap a session row to reveal its adjustments.
+    </div>
+  </div>
+
+  <!-- Timetable below -->
+  <div class="card">
+    <div class="svg-wrap">
+      <div id="emptyHint" class="section muted">Start a timer to create the timetable.</div>
+      <div id="svgRegion" class="svg-box" style="display:none;"></div>
+      <div class="legend" id="legend"></div>
+    </div>
+  </div>
+</main>
+
+<script>
+const state = {
+  period:"",
+  hours:10,
+  anchorMs:null,
+  timers:[],
+  fit:true
+};
+const LS_KEY='mt.svg.v1';
+const PALETTE=['#3b82f6','#22c55e','#f59e0b','#ef4444','#a855f7','#14b8a6','#eab308','#fb7185','#06b6d4','#8b5cf6','#84cc16','#f97316'];
+
+function save(){try{localStorage.setItem(LS_KEY,JSON.stringify(state));}catch(e){}}
+function load(){try{const raw=localStorage.getItem(LS_KEY);if(!raw)return;Object.assign(state,JSON.parse(raw));}catch(e){}}
+function uid(){return Math.random().toString(36).slice(2,9);}
+function hashString(s){let h=0;for(let i=0;i<s.length;i++){h=((h<<5)-h)+s.charCodeAt(i);h|=0;}return Math.abs(h);}
+function colorForName(n){if(!n)return PALETTE[0];return PALETTE[Math.abs(hashString(n.toLowerCase()))%PALETTE.length];}
+function effectiveColor(t){const c=t.color||colorForName(t.name||'');t.color=c;return c;}
+function pad2(n){return String(n).padStart(2,'0');}
+function fmtHMSFromMs(ms){const s=Math.max(0,Math.floor(ms/1000));const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),ss=s%60;return `${pad2(h)}:${pad2(m)}:${pad2(ss)}`;}
+function getWindow(){if(state.anchorMs==null)return null;return{start:state.anchorMs,end:state.anchorMs+state.hours*3600000};}
+function computeTotalMs(t){let ms=0;for(const s of t.sessions||[]){if(s.end>s.start)ms+=(s.end-s.start);}if(t.running&&t.runStart){ms+=(Date.now()-t.runStart);}return ms;}
+function reindexLanes(){(state.timers||[]).forEach((t,i)=>t.lane=i);}
+function anyRunning(){return(state.timers||[]).some(t=>t.running);}
+function startTimer(id){const t=state.timers.find(x=>x.id===id);if(!t||t.running)return;const now=Date.now();t.running=true;t.runStart=now;if(state.anchorMs==null)state.anchorMs=now;save();renderAll();ensureTick();}
+function stopTimer(id){const t=state.timers.find(x=>x.id===id);if(!t||!t.running)return;const now=Date.now();if(now>t.runStart){(t.sessions||(t.sessions=[])).push({start:t.runStart,end:now});}t.running=false;t.runStart=null;save();renderAll();if(!anyRunning())stopTick();}
+
+let tick=null;function ensureTick(){if(!tick){tick=setInterval(()=>{if(anyRunning()){renderTimers();renderSVG();}else{stopTick();}},1000);}}function stopTick(){if(tick){clearInterval(tick);tick=null;}}
+
+const periodInput=document.getElementById('periodInput');
+const hoursInput=document.getElementById('hoursInput');
+const resetAllBtn=document.getElementById('resetAll');
+const fitToggle=document.getElementById('fitToggle');
+const timersEl=document.getElementById('timers');
+const newNameInput=document.getElementById('newName');
+const addBtn=document.getElementById('addBtn');
+const emptyHint=document.getElementById('emptyHint');
+const svgRegion=document.getElementById('svgRegion');
+const legendEl=document.getElementById('legend');
+
+function renderTimers(){
+  timersEl.innerHTML='';
+  (state.timers||[]).forEach(t=>{
+    t.color=effectiveColor(t);
+    if(typeof t.showSessions==='undefined')t.showSessions=false;
+
+    const card=document.createElement('div');card.className='timer';
+
+    const nameRow=document.createElement('div');nameRow.className='name-edit';
+    const nameLabel=document.createElement('input');nameLabel.type='text';nameLabel.value=t.name;nameLabel.style.width='180px';nameLabel.disabled=true;
+    const ren=document.createElement('button');ren.className='small';ren.textContent='Rename';
+    const sav=document.createElement('button');sav.className='small';sav.textContent='Save';sav.style.display='none';
+    const can=document.createElement('button');can.className='small';can.textContent='Cancel';can.style.display='none';
+    ren.onclick=()=>{nameLabel.disabled=false;nameLabel.focus();ren.style.display='none';sav.style.display='';can.style.display='';};
+    sav.onclick=()=>{t.name=(nameLabel.value||'').trim()||t.name;t.color=effectiveColor(t);nameLabel.value=t.name;nameLabel.disabled=true;ren.style.display='';sav.style.display='none';can.style.display='none';save();renderLegend();renderSVG();};
+    can.onclick=()=>{nameLabel.value=t.name;nameLabel.disabled=true;ren.style.display='';sav.style.display='none';can.style.display='none';};
+    nameRow.append(nameLabel,ren,sav,can);
+
+    const meta=document.createElement('div');meta.className='meta';meta.textContent=`Total: ${fmtHMSFromMs(computeTotalMs(t))}`;
+
+    const pill=document.createElement('div');pill.className='chip';pill.innerHTML=`Lane ${t.lane+1}`;
+    const tgl=document.createElement('button');tgl.className='small';tgl.textContent=(t.showSessions?'Hide Sessions':'Show Sessions');
+    tgl.onclick=()=>{t.showSessions=!t.showSessions;save();renderTimers();};
+    const pillLine=document.createElement('div');pillLine.className='pillline';pillLine.append(pill,tgl);
+
+    const controls=document.createElement('div');controls.className='controls';
+    const left=document.createElement('div');left.className='controls-left';
+    const start=document.createElement('button');start.textContent=t.running?'Running…':'Start';start.disabled=t.running;if(t.running)start.classList.add('btn-running');start.onclick=()=>startTimer(t.id);
+    const stop=document.createElement('button');stop.textContent='Stop';stop.onclick=()=>stopTimer(t.id);
+    left.append(start,stop);
+    const del=document.createElement('button');del.textContent='Delete';del.className='btn-danger';del.onclick=()=>{if(confirm(`Delete "${t.name}" and its history?`)){state.timers=state.timers.filter(x=>x.id!==t.id);reindexLanes();save();renderAll();}};
+    controls.append(left,del);
+
+    const sessions=document.createElement('div');sessions.className='sessions';
+    const stitle=document.createElement('div');stitle.innerHTML='<strong>Sessions</strong>';sessions.appendChild(stitle);
+
+    const mags=[20,10,5,1];
+    const pairs=(t.sessions||[]).map((s,idx)=>({s,idx})).sort((a,b)=>a.s.start-b.s.start);
+    pairs.forEach(({s,idx})=>{
+      const row=document.createElement('div');row.className='session-row';
+      const info=document.createElement('div');info.className='session-info';
+
+      const st=new Date(s.start),en=new Date(s.end);
+      let oS=0,oE=0;if(state.anchorMs!=null){const d0=new Date(state.anchorMs);d0.setHours(0,0,0,0);const base=d0.getTime();oS=Math.floor((s.start-base)/86400000);oE=Math.floor((s.end-base)/86400000);}
+      const durMs=Math.max(0,s.end-s.start);const dur=fmtHMSFromMs(durMs);
+      info.textContent=`${pad2(st.getHours())}:${pad2(st.getMinutes())} (+${oS}) → ${pad2(en.getHours())}:${pad2(en.getMinutes())} (+${oE}) · ${dur}`;
+
+      if(typeof s.showAdj==='undefined')s.showAdj=false;
+      info.style.cursor='pointer';
+      info.title='Tap to show/hide adjustments for this session';
+      info.onclick=()=>{s.showAdj=!s.showAdj;save();renderTimers();};
+
+      row.appendChild(info);
+
+      if(s.showAdj){
+        const wrap=document.createElement('div');wrap.className='session-controls-wrap';
+
+        const sh=document.createElement('div');sh.className='control-header';sh.textContent='Start Time Adjustments';
+        const sgrid=document.createElement('div');sgrid.className='button-grid';
+        mags.forEach(m=>{const b=document.createElement('button');b.className='small';b.textContent=`-${m}`;b.title=`Start ${-m}m`;b.onclick=()=>adjustSession(t.id,idx,'start',-m);sgrid.appendChild(b);});
+        mags.forEach(m=>{const b=document.createElement('button');b.className='small';b.textContent=`+${m}`;b.title=`Start +${m}m`;b.onclick=()=>adjustSession(t.id,idx,'start',m);sgrid.appendChild(b);});
+
+        const sep=document.createElement('div');sep.className='sep';
+
+        const eh=document.createElement('div');eh.className='control-header';eh.textContent='End Time Adjustments';
+        const egrid=document.createElement('div');egrid.className='button-grid';
+        mags.forEach(m=>{const b=document.createElement('button');b.className='small';b.textContent=`-${m}`;b.title=`End ${-m}m`;b.onclick=()=>adjustSession(t.id,idx,'end',-m);egrid.appendChild(b);});
+        mags.forEach(m=>{const b=document.createElement('button');b.className='small';b.textContent=`+${m}`;b.title=`End +${m}m`;b.onclick=()=>adjustSession(t.id,idx,'end',m);egrid.appendChild(b);});
+
+        const delSess=document.createElement('button');delSess.className='small btn-danger';delSess.style.width='100%';delSess.textContent='Delete session';delSess.onclick=()=>{const tt=state.timers.find(tt=>tt.id===t.id);if(tt){tt.sessions.splice(idx,1);save();renderAll();}};
+
+        wrap.append(sh,sgrid,sep,eh,egrid,delSess);
+        row.appendChild(wrap);
+      }
+
+      sessions.appendChild(row);
+    });
+
+    card.append(nameRow,meta,pillLine,controls);
+    if(t.showSessions){
+      card.appendChild(sessions);
+    }
+    timersEl.appendChild(card);
+  });
+}
+
+function adjustSession(id,idx,w,d){
+  const t=state.timers.find(tt=>tt.id===id);if(!t)return;
+  const s=t.sessions[idx];if(!s)return;
+  if(w==='start'){
+    s.start=Math.max(0,Number(s.start)+d*60000);
+    if(s.end<=s.start)s.end=s.start+60000;
+  }else{
+    s.end=Math.max(0,Number(s.end)+d*60000);
+    if(s.end<=s.start)s.end=s.start+60000;
+  }
+  save();renderAll();
+}
+
+function renderLegend(){
+  legendEl.innerHTML='';
+  (state.timers||[]).forEach(t=>{
+    t.color=effectiveColor(t);
+    const chip=document.createElement('div');chip.className='chip';
+    const sw=document.createElement('span');sw.style.display='inline-block';sw.style.width='12px';sw.style.height='12px';sw.style.borderRadius='50%';sw.style.background=t.color;
+    const nm=document.createElement('span');nm.textContent=t.name;
+    chip.append(sw,nm);
+    legendEl.appendChild(chip);
+  });
+}
+
+function lanes(){return Math.max(1,(state.timers||[]).length);}
+
+function renderSVG(){
+  const win=getWindow();
+  svgRegion.style.display = win ? 'flex' : 'none';
+  emptyHint.style.display = win ? 'none' : '';
+
+  if(!win) return;
+
+  const rootStyle = getComputedStyle(document.documentElement);
+  const timeCol = parseFloat(rootStyle.getPropertyValue('--time-col')) || 140;
+  const laneW   = parseFloat(rootStyle.getPropertyValue('--lane-w')) || 92;
+  const rowH    = parseFloat(rootStyle.getPropertyValue('--row-h')) || 28;
+  const padR    = parseFloat(rootStyle.getPropertyValue('--pad-right')) || 40;
+  const padB    = parseFloat(rootStyle.getPropertyValue('--pad-bottom')) || 12;
+
+  const totalLanes = lanes();
+  const totalRows  = Math.max(1, Math.round((win.end - win.start) / (30*60*1000))); // 30-min rows
+  const width  = timeCol + totalLanes * laneW + padR;
+  const height = totalRows * rowH + padB;
+
+  svgRegion.innerHTML = "";
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(svgNS,'svg');
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  svg.setAttribute('preserveAspectRatio','xMidYMid meet');
+
+  const gBG   = document.createElementNS(svgNS,'g');
+  const gBars = document.createElementNS(svgNS,'g');
+  const gOV   = document.createElementNS(svgNS,'g');
+  svg.append(gBG,gBars,gOV);
+
+  const gridColor = rootStyle.getPropertyValue('--grid') || '#233040';
+  const mutColor  = rootStyle.getPropertyValue('--muted') || '#9aa3b2';
+  const bndColor  = rootStyle.getPropertyValue('--boundary') || '#334155';
+  const anchColor = rootStyle.getPropertyValue('--marker') || '#10b981';
+
+  for(let r=0;r<=totalRows;r++){
+    const y = r * rowH;
+    const t0 = new Date(win.start + r*30*60000);
+    const t1 = new Date(win.start + (r+1)*30*60000);
+    let d0 = 0;
+    if(state.anchorMs!=null){
+      d0 = Math.floor((t0.getTime()-state.anchorMs)/(24*3600000));
+    }
+
+    const line = document.createElementNS(svgNS,'line');
+    line.setAttribute('x1', 0);
+    line.setAttribute('y1', y);
+    line.setAttribute('x2', width);
+    line.setAttribute('y2', y);
+    line.setAttribute('stroke', gridColor.trim() || '#233040');
+    line.setAttribute('stroke-dasharray','4 4');
+    gBG.appendChild(line);
+
+    const lbl = document.createElementNS(svgNS,'text');
+    lbl.setAttribute('x', 8);
+    lbl.setAttribute('y', y + 12);
+    lbl.setAttribute('fill', mutColor.trim() || '#9aa3b2');
+    lbl.setAttribute('font-size','12');
+    lbl.textContent = `${pad2(t0.getHours())}:${pad2(t0.getMinutes())}–${pad2(t1.getHours())}:${pad2(t1.getMinutes())} (+${d0})`;
+    gBG.appendChild(lbl);
+  }
+
+  for(let i=0;i<totalLanes;i++){
+    const x = timeCol + i*laneW;
+    const v = document.createElementNS(svgNS,'line');
+    v.setAttribute('x1', x);
+    v.setAttribute('y1', 0);
+    v.setAttribute('x2', x);
+    v.setAttribute('y2', height);
+    v.setAttribute('stroke', '#1d2633');
+    gBG.appendChild(v);
+  }
+
+  const windowStart = win.start;
+  const windowEnd   = win.end;
+
+  (state.timers||[]).forEach(t=>{
+    const color=effectiveColor(t);
+    (t.sessions||[]).forEach(s=>{
+      const ss=Math.max(s.start,windowStart);
+      const ee=Math.min(s.end,windowEnd);
+      if(ee<=ss) return;
+      addBarSVG(svgNS,gBars,t,color,ss,ee,laneW,timeCol,windowStart,rowH);
+    });
+    if(t.running){
+      const now=Date.now();
+      const ss=Math.max(t.runStart,windowStart);
+      let ee=Math.min(now,windowEnd);
+      if(ee<=ss) ee=ss+1;
+      addBarSVG(svgNS,gBars,t,color,ss,ee,laneW,timeCol,windowStart,rowH);
+    }
+  });
+
+  addBoundariesSVG(svgNS,gOV,windowStart,windowEnd,width,rowH,bndColor,mutColor);
+  addAnchorSVG(svgNS,gOV,windowStart,windowEnd,state.anchorMs,width,rowH,anchColor);
+
+  svgRegion.appendChild(svg);
+}
+
+function addBarSVG(svgNS,g,t,color,startMs,endMs,laneW,timeCol,windowStart,rowH){
+  const laneX = timeCol + t.lane*laneW + 4;
+  const barW  = laneW - 8;
+
+  const startMin = (startMs - windowStart)/60000;
+  const endMin   = (endMs   - windowStart)/60000;
+  const duraMin  = Math.max(0, endMin - startMin);
+
+  const topY = (startMin/30) * rowH;
+  const h    = (duraMin /30) * rowH;
+
+  const rect=document.createElementNS(svgNS,'rect');
+  rect.setAttribute('x', laneX);
+  rect.setAttribute('y', topY);
+  rect.setAttribute('rx','8'); rect.setAttribute('ry','8');
+  rect.setAttribute('width', barW);
+  rect.setAttribute('height', Math.max(2,h-2));
+  rect.setAttribute('fill', color);
+  rect.setAttribute('opacity','0.95');
+  rect.setAttribute('stroke','#000'); rect.setAttribute('stroke-opacity','0.2');
+  g.appendChild(rect);
+
+  const label=document.createElementNS(svgNS,'text');
+  label.setAttribute('x', laneX + 6);
+  label.setAttribute('y', topY + 14);
+  label.setAttribute('fill','#fff');
+  label.setAttribute('font-size','12');
+  label.textContent=t.name;
+  g.appendChild(label);
+}
+
+function addBoundariesSVG(svgNS,g,start,end,width,rowH,bndColor,mutColor){
+  const dayMs=24*3600000;
+  const first=new Date(start);first.setHours(24,0,0,0);
+  for(let t=first.getTime();t<end;t+=dayMs){
+    const minutesFromStart=(t-start)/60000;
+    const y=(minutesFromStart/30)*rowH;
+
+    const line=document.createElementNS(svgNS,'line');
+    line.setAttribute('x1',0); line.setAttribute('y1',y);
+    line.setAttribute('x2',width); line.setAttribute('y2',y);
+    line.setAttribute('stroke', bndColor.trim() || '#334155');
+    line.setAttribute('stroke-dasharray','4 4');
+    g.appendChild(line);
+
+    const lbl=document.createElementNS(svgNS,'text');
+    lbl.setAttribute('x', width - 140);
+    lbl.setAttribute('y', y - 4);
+    lbl.setAttribute('fill', mutColor.trim() || '#9aa3b2');
+    lbl.setAttribute('font-size','11');
+    const d=new Date(t);
+    const dayOffset=Math.floor((t-start)/dayMs);
+    lbl.textContent=`— ${pad2(d.getHours())}:00 (+${dayOffset}) —`;
+    g.appendChild(lbl);
+  }
+}
+
+function addAnchorSVG(svgNS,g,windowStart,windowEnd,anchorMs,width,rowH,anchColor){
+  if(anchorMs == null) return;
+  if(anchorMs < windowStart || anchorMs > windowEnd) return;
+
+  const minutesFromStart=(anchorMs-windowStart)/60000;
+  const y=(minutesFromStart/30)*rowH;
+
+  const line=document.createElementNS(svgNS,'line');
+  line.setAttribute('x1',0); line.setAttribute('y1',y);
+  line.setAttribute('x2',width); line.setAttribute('y2',y);
+  line.setAttribute('stroke', anchColor.trim() || '#10b981');
+  line.setAttribute('stroke-width','2');
+  g.appendChild(line);
+
+  const lbl=document.createElementNS(svgNS,'text');
+  lbl.setAttribute('x', 8);
+  lbl.setAttribute('y', y - 6);
+  lbl.setAttribute('fill', anchColor.trim() || '#10b981');
+  lbl.setAttribute('font-size','11');
+  const d=new Date(anchorMs);
+  lbl.textContent=`Anchor ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  g.appendChild(lbl);
+}
+
+periodInput.addEventListener('input',()=>{state.period=periodInput.value;save();});
+hoursInput.addEventListener('change',()=>{
+  const v=Math.max(10,Math.min(72,Number(hoursInput.value)||10));
+  state.hours=v;hoursInput.value=v;save();renderAll();
+});
+fitToggle.addEventListener('click',()=>{
+  state.fit=!state.fit;
+  fitToggle.textContent='Auto-Fit: '+(state.fit?'On':'Off');
+  save();
+});
+
+resetAllBtn.addEventListener('click',()=>{
+  if(!confirm('Reset everything and start a new period?'))return;
+  Object.assign(state,{period:"",hours:10,anchorMs:null,timers:[],fit:state.fit});
+  save();renderAll();
+});
+
+addBtn.addEventListener('click',()=>{
+  const name=(newNameInput.value||'').trim()||`Timer ${state.timers.length+1}`;
+  newNameInput.value='';
+  const t={id:uid(),name,lane:state.timers.length,color:colorForName(name),running:false,runStart:null,sessions:[],showSessions:false};
+  (state.timers||[]).push(t);save();
+  renderTimers();renderLegend();if(getWindow())renderSVG();
+});
+
+function renderAll(){
+  periodInput.value=state.period||"";
+  hoursInput.value=state.hours;
+  fitToggle.textContent='Auto-Fit: '+(state.fit?'On':'Off');
+  renderTimers();renderLegend();
+  const hasWindow=!!getWindow();
+  svgRegion.style.display=hasWindow?'flex':'none';
+  emptyHint.style.display=hasWindow?'none':'';
+  if(hasWindow)renderSVG();
+}
+
+window.addEventListener('resize',()=>{if(getWindow())renderSVG();});
+if(window.visualViewport){
+  window.visualViewport.addEventListener('resize',()=>{if(getWindow())renderSVG();});
+}
+
+(function init(){
+  load();
+  if(!state.timers)state.timers=[];
+  reindexLanes();
+  renderAll();
+})();
+</script>
+</body>
+</html>
